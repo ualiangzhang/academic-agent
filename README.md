@@ -164,13 +164,13 @@ Chunking & embeddings:
 1. Bootstrap infra with CDK stacks: VPC (if used), Aurora, S3, API Gateway, Lambdas, Step Functions, Bedrock policies.
 2. Implement ingest Lambda chain: S3 event → extract (Textract/PyPDF2) → summarize → embed → store (pgvector).
 3. Define DB schema (tables above), create pgvector extension, indexes (ivfflat), and RLS policies per tenant/user.
-4. Build query Lambda: hybrid retrieval (metadata filter + vector), context assembler, answer synthesis（Bedrock）。
-5. Add planner/verifier loop: plan → execute (MCP tools) → verify → refine → respond；配置 `PLANNER_*`。
-6. Implement MCP tool providers (`/packages/tools`): `rag.search`, `rag.citations`, `web.arxiv`, `web.semantic_scholar`。
-7. Frontend：Next.js chat UI、上传、管理页；OAuth2 PKCE（Cognito）。
-8. Observability：CloudWatch/X-Ray 指标面板与告警；请求日志结构化。
-9. Testing：单测、localstack 集成测、E2E、负载测试；建立检索评测基线（Recall@k）。
-10. Cost guardrails：并发上限、批量嵌入、预算与告警；区域模型可用性回退。
+4. Build query Lambda: hybrid retrieval (metadata filter + vector), context assembly, answer synthesis (Bedrock).
+5. Add planner/verifier loop: plan -> execute (MCP tools) -> verify -> refine -> respond; configure `PLANNER_*`.
+6. Implement MCP tool providers (`/packages/tools`): `rag.search`, `rag.citations`, `web.arxiv`, `web.semantic_scholar`.
+7. Frontend: Next.js chat UI, upload, admin pages; OAuth2 PKCE (Cognito).
+8. Observability: CloudWatch/X-Ray dashboards and alerts; structured request logging.
+9. Testing: unit, localstack integration, E2E, load; establish retrieval evaluation baseline (Recall@k).
+10. Cost guardrails: concurrency limits, batch embeddings, budgets and alerts; regional model availability fallback.
 
 ---
 
