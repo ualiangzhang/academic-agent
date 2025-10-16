@@ -262,7 +262,7 @@ make tools.up          # starts local MCP tool providers (if configured)
 ```bash
 export AWS_PROFILE=dev-sandbox
 make deploy STAGE=dev
-# CDK synthesises & deploys all stacks
+# CDK synthesizes & deploys all stacks
 ```
 
 ### 5 – Destroy
