@@ -79,7 +79,7 @@ flowchart TD
 | **Auth** | Amazon Cognito OAuth2 | Managed user pools, MFA |
 | **API** | API Gateway REST / Lambda (Python 3.12) | Pay-per-ms, easy rollbacks |
 | **Workflow** | AWS Step Functions Express | Event-driven pipeline |
-| **Storage** | S3, Aurora PostgreSQL v2 + pgvector | Cheap, scales to 15 M docs |
+ | **Storage** | S3, Aurora PostgreSQL v2 + pgvector | Cost-effective; scales to tens of millions of chunks with proper indexing |
 | **Vector Search** | pgvector ivfflat index; optional OpenSearch | Start cheap, upgrade later |
 | **LLM & Embeddings** | Amazon Bedrock (Claude Haiku or Command R; Titan Text Embeddings) | On-demand token billing; model availability varies by region |
 | **IaC & CI** | AWS CDK v2 (TypeScript), GitHub Actions | Unified infra-app repo |
@@ -147,6 +147,7 @@ Chunking & embeddings:
 - Timeouts: MCP tools default 10s; retrieval 3s budget; overall chat 20s P95.
 - Fallbacks: model fallback chain by region availability; degrade to metadata-only search if embeddings unavailable.
 - Error handling: Step Functions catch/choice paths; DLQ for ingest; alarms on failure rates and latency SLO breaches.
+ - TTL enforcement: ephemeral chat memory TTL is enforced by a scheduled cleanup (EventBridge + Lambda).
 
 ---
 
@@ -154,7 +155,7 @@ Chunking & embeddings:
 
 - Logging: structured JSON logs (request_id, user_id, tool_id, latency_ms, cost_tokens).
 - Metrics: retrieval hit-rate, Recall@k, verifier pass-rate, refusal rate, cost/request, QPS.
-- Tracing: AWS X-Ray for API → Lambda → DB; add custom subsegments for MCP tool calls.
+- Tracing: AWS X-Ray for API → Lambda; add custom subsegments for MCP tool calls. Use Performance Insights and `pg_stat_statements` for DB query visibility.
 - Dashboards & Alerts: CloudWatch dashboards; alarms wired to SNS/Slack for error rate, latency P95, budget threshold.
 
 ---
@@ -162,10 +163,10 @@ Chunking & embeddings:
 ## System Development Steps
 
 1. Bootstrap infra with CDK stacks: VPC (if used), Aurora, S3, API Gateway, Lambdas, Step Functions, Bedrock policies.
-2. Implement ingest Lambda chain: S3 event → extract (Textract/PyPDF2) → summarize → embed → store (pgvector).
+2. Implement ingest Lambda chain: S3 event → extract (route to PyPDF2 for digital PDFs; Textract for scans) → summarize → embed → store (pgvector). Include retries, DLQ, and idempotency.
 3. Define DB schema (tables above), create pgvector extension, indexes (ivfflat), and RLS policies per tenant/user.
 4. Build query Lambda: hybrid retrieval (metadata filter + vector), context assembly, answer synthesis (Bedrock).
-5. Add planner/verifier loop: plan -> execute (MCP tools) -> verify -> refine -> respond; configure `PLANNER_*`.
+5. Add planner/verifier loop: plan -> execute (MCP tools) -> verify -> refine -> respond; configure `PLANNER_*`. Choose Step Functions Express for short/high-QPS steps, Standard for long-running or audit-heavy steps.
 6. Implement MCP tool providers (`/packages/tools`): `rag.search`, `rag.citations`, `web.arxiv`, `web.semantic_scholar`.
 7. Frontend: Next.js chat UI, upload, admin pages; OAuth2 PKCE (Cognito).
 8. Observability: CloudWatch/X-Ray dashboards and alerts; structured request logging.
@@ -321,6 +322,7 @@ Local `.env` is never committed; `cdk.json` injects sane defaults during synth f
 | **Synth & Diff** | `ci.yml` | Fails if CDK diff not empty / unapproved |
 | **Dev Deploy** | `deploy-dev.yml` | Auto on push to main; CDK deploy to dev account |
 | **Nightly E2E** | `e2e-nightly.yml` | Cypress vs. live stack; Artillery load run |
+| **Prod Approval** | `deploy-prod.yml` | Manual approval gate on CDK diff; change freeze support |
 
 ---
 
@@ -338,12 +340,12 @@ artillery run tests/load/chat-10rps.yml
 ## Cost Guardrails
 
 - **Aurora Serverless v2** with minimal ACU and auto-scaling; prefer off-hours scale-down.
-- **Bedrock batch embeddings** (≈ 50% cheaper).
+- **Bedrock batch embeddings** (can significantly reduce cost for large backfills).
 - **Lambda concurrency ceilings** via CDK `reservedConcurrentExecutions`.
 - **AWS Budgets** alarm → Slack / SNS (see `observability-stack.ts`).
 - **MCP tool budgets**: per-tool rate limits and timeouts; disable costly tools in `prod`.
 
-Starter footprint ≈ **$30 USD / mo** for a research group (<1k papers, 1k QPS burst).
+Starter footprint varies with Aurora ACU floor, region, and workload. Expect higher than **$30 USD/mo** with Aurora Serverless v2 in many scenarios.
 
 ---
 
