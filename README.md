@@ -19,16 +19,20 @@ A full-stack, serverless application for uploading, indexing, and conversing wit
 5. [Planner/Verifier Loops](#plannerverifier-loops)
 6. [Memory & Context Strategy](#memory--context-strategy)
 7. [Framework Integrations (LangChain/LangGraph/CrewAI/AutoGen)](#framework-integrations-langchainlanggraphcrewaiautogen)
-8. [Getting Started](#getting-started)
-9. [Repository Layout](#repository-layout)
-10. [Configuration](#configuration)
-11. [CI / CD](#ci--cd)
-12. [Testing](#testing)
-13. [Cost Guardrails](#cost-guardrails)
-14. [Security & Compliance](#security--compliance)
-15. [Roadmap](#roadmap)
-16. [Contributing](#contributing)
-17. [License](#license)
+8. [Data Model & Indexing](#data-model--indexing)
+9. [Reliability & Limits](#reliability--limits)
+10. [Observability](#observability)
+11. [System Development Steps](#system-development-steps)
+12. [Getting Started](#getting-started)
+13. [Repository Layout](#repository-layout)
+14. [Configuration](#configuration)
+15. [CI / CD](#ci--cd)
+16. [Testing](#testing)
+17. [Cost Guardrails](#cost-guardrails)
+18. [Security & Compliance](#security--compliance)
+19. [Roadmap](#roadmap)
+20. [Contributing](#contributing)
+21. [License](#license)
 
 ---
 
@@ -73,11 +77,11 @@ flowchart TD
 |-------|-------------------------------------------------------------------|-----------|
 | **Frontend** | Next.js 14, React 18, Tailwind CSS | Static hosting, fast DX |
 | **Auth** | Amazon Cognito OAuth2 | Managed user pools, MFA |
-| **API** | API Gateway REST / Lambda (Python 3.11) | Pay-per-ms, easy rollbacks |
+| **API** | API Gateway REST / Lambda (Python 3.12) | Pay-per-ms, easy rollbacks |
 | **Workflow** | AWS Step Functions Express | Event-driven pipeline |
 | **Storage** | S3, Aurora PostgreSQL v2 + pgvector | Cheap, scales to 15 M docs |
 | **Vector Search** | pgvector ivfflat index; optional OpenSearch | Start cheap, upgrade later |
-| **LLM & Embeddings** | Amazon Bedrock (Claude Haiku or Command R; Titan Text Embeddings) | On-demand token billing |
+| **LLM & Embeddings** | Amazon Bedrock (Claude Haiku or Command R; Titan Text Embeddings) | On-demand token billing; model availability varies by region |
 | **IaC & CI** | AWS CDK v2 (TypeScript), GitHub Actions | Unified infra-app repo |
 
 ---
@@ -111,6 +115,62 @@ Optional orchestration frameworks (behind flags) can be layered on top without c
 | `web.semantic_scholar` | Enrich metadata | Semantic Scholar API |
 
 Each tool declares inputs/outputs (JSON schema), side effects, and cost hints. The agent runtime applies a policy: allowlist, rate limits, timeouts, and content guardrails.
+
+---
+
+## Data Model & Indexing
+
+High-level schema to support ingest, retrieval, and auditability:
+
+- `papers(id, title, authors, venue, year, doi, arxiv_id, sha256, s3_key, created_at, owner_user_id, tenant_id)`
+- `chunks(id, paper_id, chunk_index, text, tokens, section, page_from, page_to, created_at)`
+- `embeddings(chunk_id, vector)`  — pgvector column, cosine distance, ivfflat index
+- `citations(id, paper_id, chunk_id, span_start, span_end, ref, page)`
+- `conversations(id, user_id, title, created_at, ttl_at)`
+- `messages(id, conversation_id, role, content, created_at)`  — short-lived, summarized over time
+- `tool_invocations(id, tool_id, actor_user_id, args_hash, cost_estimate, status, created_at)`
+
+pgvector considerations:
+- Metric: cosine; Index: `ivfflat(lists=N)` with periodic `ANALYZE` and `REINDEX` policies.
+- Batch insert during ingest; defer index build or use `SET maintenance_work_mem` for large backfills.
+
+Chunking & embeddings:
+- Default `CHUNK_SIZE=1,000` chars, `CHUNK_OVERLAP=200`; PDF structure heuristics to respect headings.
+- Batch size tuned for Titan rate limits; retry with exponential backoff and dead-letter queue.
+
+---
+
+## Reliability & Limits
+
+- Retries: external APIs (arXiv/S2/Bedrock) use capped exponential backoff; idempotency keys by `(paper_sha256, step_name)`.
+- Rate limits: per-tool QPS ceilings; Step Functions concurrency limits; Lambda reserved concurrency.
+- Timeouts: MCP tools default 10s; retrieval 3s budget; overall chat 20s P95.
+- Fallbacks: model fallback chain by region availability; degrade to metadata-only search if embeddings unavailable.
+- Error handling: Step Functions catch/choice paths; DLQ for ingest; alarms on failure rates and latency SLO breaches.
+
+---
+
+## Observability
+
+- Logging: structured JSON logs (request_id, user_id, tool_id, latency_ms, cost_tokens).
+- Metrics: retrieval hit-rate, Recall@k, verifier pass-rate, refusal rate, cost/request, QPS.
+- Tracing: AWS X-Ray for API → Lambda → DB; add custom subsegments for MCP tool calls.
+- Dashboards & Alerts: CloudWatch dashboards; alarms wired to SNS/Slack for error rate, latency P95, budget threshold.
+
+---
+
+## System Development Steps
+
+1. Bootstrap infra with CDK stacks: VPC (if used), Aurora, S3, API Gateway, Lambdas, Step Functions, Bedrock policies.
+2. Implement ingest Lambda chain: S3 event → extract (Textract/PyPDF2) → summarize → embed → store (pgvector).
+3. Define DB schema (tables above), create pgvector extension, indexes (ivfflat), and RLS policies per tenant/user.
+4. Build query Lambda: hybrid retrieval (metadata filter + vector), context assembler, answer synthesis（Bedrock）。
+5. Add planner/verifier loop: plan → execute (MCP tools) → verify → refine → respond；配置 `PLANNER_*`。
+6. Implement MCP tool providers (`/packages/tools`): `rag.search`, `rag.citations`, `web.arxiv`, `web.semantic_scholar`。
+7. Frontend：Next.js chat UI、上传、管理页；OAuth2 PKCE（Cognito）。
+8. Observability：CloudWatch/X-Ray 指标面板与告警；请求日志结构化。
+9. Testing：单测、localstack 集成测、E2E、负载测试；建立检索评测基线（Recall@k）。
+10. Cost guardrails：并发上限、批量嵌入、预算与告警；区域模型可用性回退。
 
 ---
 
@@ -277,7 +337,7 @@ artillery run tests/load/chat-10rps.yml
 
 ## Cost Guardrails
 
-- **Aurora v1 auto-pause** to 0 ACU on idle.
+- **Aurora Serverless v2** with minimal ACU and auto-scaling; prefer off-hours scale-down.
 - **Bedrock batch embeddings** (≈ 50% cheaper).
 - **Lambda concurrency ceilings** via CDK `reservedConcurrentExecutions`.
 - **AWS Budgets** alarm → Slack / SNS (see `observability-stack.ts`).
