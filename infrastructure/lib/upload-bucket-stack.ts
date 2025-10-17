@@ -17,7 +17,7 @@ export class UploadBucketStack extends cdk.Stack {
 
     bucket.addLifecycleRule({
       transitions: [{ storageClass: cdk.aws_s3.StorageClass.INTELLIGENT_TIERING, transitionAfter: Duration.days(30) }],
-      expiredObjectDeleteMarker: true
+      expiredObjectDeleteMarkers: true
     });
 
     new cdk.CfnOutput(this, "UploadBucketName", { value: bucket.bucketName });
