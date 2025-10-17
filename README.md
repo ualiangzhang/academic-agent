@@ -301,8 +301,8 @@ All runtime settings are 12-factor environment variables.
 | `AWS_REGION` | AWS region | `us-east-1` |
 | `UPLOAD_BUCKET` | S3 bucket for PDFs | `academic-dev-uploads` |
 | `DB_SECRET_NAME` | RDS Secrets Manager name | `academic/dev/aurora` |
-| `BEDROCK_MODEL_ID` | Claude, Command R, etc. | `anthropic.claude-3-haiku-20240229-v1:0` |
-| `EMBEDDING_MODEL_ID` | Titan Text Embeddings | `amazon.titan-embed-text-v1` |
+| `BEDROCK_MODEL_ID` | Claude, Command R, etc. | `anthropic.claude-3-haiku-20240307-v1:0` |
+| `EMBEDDING_MODEL_ID` | Titan Text Embeddings | `amazon.titan-embed-text-v2:0` |
 | `PLANNER_ENABLED` | Enable plan/execute/verify loops | `true` |
 | `PLANNER_MAX_RETRIES` | Verification-driven retries | `1` |
 | `EXPERIMENTAL_AGENT_FRAMEWORK` | `none` \| `langgraph` \| `crewai` \| `autogen` | `none` |
